@@ -799,7 +799,7 @@ Example MongoDB document:
 
 # Del 5 – Bug Analysis & Bottlenecks
 
-## Slow Queries
+## Problem A- Slow Queries in PostgreSQL 
 
 Problem:
 
@@ -809,6 +809,23 @@ FROM customers
 WHERE LOWER(email) = LOWER('sara@example.com');
 ```
 
+Why is it slow?
+
+Because:
+
+      LOWER(email)
+
+forces PostgreSQL to apply a function on every row.
+
+That means the normal index on email cannot be used efficiently.
+
+PostgreSQL may perform a:
+
+      * full table scan
+      * checking every row one by one
+
+This becomes very slow with millions of customers.
+
 ### Solution
 
 Create indexes:
@@ -817,40 +834,100 @@ Create indexes:
 CREATE INDEX idx_customers_email
 ON customers(email);
 ```
+Then query:
+
+      SELECT *
+      FROM customers
+      WHERE email = 'sara@example.com';
+
+Now the index works efficiently.
+
+What we resolve
+Functions in WHERE clauses can break index optimization
+Indexes improve lookup speed
+Large datasets require optimized queries
+---
+
+## Problem B- Duplicate Users in MongoDB
+
+Code:
+
+      db.customers.insertMany([
+        { name: "Sara", email: "sara@example.com" },
+        { name: "Sara Backup", email: "sara@example.com" }
+      ])
+Why is this a problem?
+
+MongoDB has flexible schema and no automatic uniqueness.
+
+So duplicate emails are allowed unless explicitly prevented.
+
+This can cause:
+
+      * duplicate accounts
+      * login issues
+      * inconsistent customer data
+
+Solution — Unique index
+
+Create unique constraint:
+
+      db.customers.createIndex(
+        { email: 1 },
+        { unique: true }
+      )
+
+Now duplicate emails are rejected automatically.
+
+What to say in discussion
+* MongoDB is flexible but requires manual constraints
+* SQL databases usually enforce stricter integrity
+* NoSQL gives flexibility but more responsibility to developers
 
 ---
 
-## Duplicate Users
+## Problem C — Negative Stock
 
-Problem:
+Code:
 
-Multiple users could share the same email address.
-
-### Solution
-
-```javascript
-db.customers.createIndex(
-  { email: 1 },
-  { unique: true }
-)
-```
-
----
-
-## Inventory Race Conditions
-
-Problem:
-
-Concurrent purchases could create negative stock values.
-
-### Solution
-
-```sql
 UPDATE products
 SET stock = stock - 1
-WHERE id = 1
-AND stock > 0;
-```
+WHERE id = 1;
+What is the problem?
+
+Two users buy the last product at the same time.
+
+Example:
+
+Current stock = 1
+
+User A buys:
+
+      stock becomes 0
+
+At the same moment User B also buys:
+
+      stock becomes -1
+
+Now inventory is corrupted.
+
+This is called a:
+
+* race condition
+* concurrency problem
+
+### Solution  — Conditional update
+      UPDATE products
+      SET stock = stock - 1
+      WHERE id = 1
+      AND stock > 0;
+
+Now stock only updates if inventory exists.
+
+What to say in discussion
+* Concurrent users create consistency problems
+* Inventory systems require strong consistency
+* Transactions are important in e-commerce
 
 ---
 
@@ -862,14 +939,27 @@ Part A — PostgreSQL in Python
 
 Install:
 
-    pip install psycopg2-binary
-
+    py -m pip install psycopg2-binary 
+### or 
+      pip install psycopg2-binary
+      
 2. Create Python file
 
 Example:
 
     touch postgres_test.py
+### or 
+      nano postgres_test.py
 
+Verify installation
+
+Run:
+
+      pip list
+
+You should see something like:
+
+      psycopg2-binary
 ## 4. PostgreSQL Connection
 
 ```python
@@ -905,7 +995,7 @@ cursor.execute("SELECT * FROM customers")
 rows = cursor.fetchall()
 
 ```
-### 6. Run the program
+### 6. Run the program in terminal:
 
     python postgres_test.py
 
@@ -917,10 +1007,19 @@ Expected output:
 # Part B — MongoDB in Python
 
 ### 1. Install MongoDB driver
+### Run:
     pip install pymongo
+### or 
+      py -m pip install pymongo
+
+Expected:
+
+      Successfully installed pymongo
 
 ### 2. Create Python file
     touch mongo_test.py
+ ### or 
+    nano mongo_test.py
     
 ###3. Add MongoDB code / MongoDB Connection
 
@@ -957,8 +1056,57 @@ orders = db.orders.find()
 for order in orders:
     print(order)
 ```
+Run:
 
+      python mongo_test.py
+
+Expected output:
+
+      {
+        '_id': ObjectId(...),
+        'order_id': 'order_1',
+        ...
+      }
 ---
+
+# Important concepts for presentation
+PostgreSQL connection
+
+Uses:
+
+      psycopg2
+
+Relational SQL database access.
+
+MongoDB connection
+
+Uses:
+
+      pymongo
+
+Document-based NoSQL access.
+
+Difference in querying
+PostgreSQL
+
+SQL query string:
+
+      cursor.execute("SELECT * FROM customers")
+MongoDB
+
+Collection method:
+
+      db.orders.find()
+What this exercise demonstrates
+
+You can now:
+
+* connect cloud applications to databases
+* fetch SQL data
+* fetch NoSQL documents
+* use Dockerized databases locally
+* integrate databases with Python apps
+
 
 # Del 7 – Discussion & Architecture
 
@@ -1016,57 +1164,366 @@ Acceptable for:
 * Search Results
 
 ---
+Simple architecture explanation
+
+We can say:
+
+      PostgreSQL handled transactional data
+      (orders, payments, inventory)
+      
+      MongoDB handled flexible product and document data.
+      
+      Redis could be added for caching and performance.
 
 # Del 8 – Stretch Goals
 
-## Pagination
+## Objective
+
+This section explores advanced cloud development concepts:
+
+- Pagination
+- Redis Caching
+- Database Transactions
+- Docker Volumes
+- Architecture Diagrams
+
+---
+
+# 1. Pagination
+
+Pagination loads data in smaller chunks instead of returning everything at once.
+
+## Why?
+
+Without pagination:
+
+```sql
+SELECT * FROM products;
+```
+
+Create a table containing millions of rows can become very slow.
+
+Practice in PostgreSQL
+
+Insert many products:
+
+      INSERT INTO products(name, price, stock)
+      VALUES
+      ('Laptop 1', 1000, 5),
+      ('Laptop 2', 1000, 5),
+      ('Laptop 3', 1000, 5),
+      ('Laptop 4', 1000, 5),
+      ('Laptop 5', 1000, 5),
+      ('Laptop 6', 1000, 5),
+      ('Laptop 7', 1000, 5),
+      ('Laptop 8', 1000, 5),
+      ('Laptop 9', 1000, 5),
+      ('Laptop 10', 1000, 5),
+      ('Laptop 11', 1000, 5);
+
+## Pagination query
+
+First 5 products in First page:
 
 ```sql
 SELECT *
 FROM products
-LIMIT 10 OFFSET 0;
+LIMIT 5 OFFSET 0;
 ```
+
+Next 5 products in Second page:
+
+```sql
+SELECT *
+FROM products
+LIMIT 5 OFFSET 5;
+```
+
+### Benefits
+
+- Faster queries
+- Lower memory usage
+- Better user experience
 
 ---
 
-## Redis Cache
+# 2. Redis Caching
+
+Redis is an in-memory database used for caching frequently accessed data.
+
+## Add Redis to Docker Compose
+
+```yaml
+redis:
+  image: redis:7
+  container_name: redis-demo
+  ports:
+    - "6379:6379"
+```
+
+## Start Containers
+
+```bash
+docker compose up -d
+```
+
+## Verify
+
+```bash
+docker ps
+```
+
+Expected:
+
+```text
+redis-demo
+```
+
+## Test Redis
+
+Connect:
 
 ```bash
 docker exec -it redis-demo redis-cli
 ```
 
+Ping:
+
+```bash
+PING
+```
+
+Expected:
+
+```text
+PONG
+```
+
+Store data:
+
 ```bash
 SET product_1 "Laptop"
+```
+
+Read data:
+
+```bash
 GET product_1
 ```
+## Expected output 
+      "Laptop"
+
+### Why Redis matters
+
+Redis is useful for:
+
+- Shopping carts
+- User sessions
+- Product cache
+- Frequently viewed items
 
 ---
 
-## Transactions
+# 3. Transactions
+
+Transactions guarantee that multiple operations succeed or fail together.
+
+## Example
+
+Start transaction:
 
 ```sql
 BEGIN;
+```
 
+Reduce stock:
+
+```sql
 UPDATE products
 SET stock = stock - 1
 WHERE id = 1;
+```
 
+Create order:
+
+```sql
+INSERT INTO orders(customer_id, status)
+VALUES (1, 'paid');
+```
+
+Commit:
+
+```sql
 COMMIT;
 ```
 
----
+## Rollback
 
-## Docker Volumes
+```sql
+ROLLBACK;
+```
+
+### Benefits
+
+- Prevents partial updates
+- Ensures consistency
+- Essential for payments and orders
+
+---
+Why transactions matter
+
+If payment succeeds but stock update fails:
+
+      customer charged
+      inventory incorrect
+
+Transactions prevent partial failures.
+
+# 4. Docker Volumes
+
+Volumes keep data even when containers are recreated.
+
+## PostgreSQL Volume Example
 
 ```yaml
+postgres:
+  image: postgres:16
+  container_name: sql-demo
+  environment:
+    POSTGRES_USER: student
+    POSTGRES_PASSWORD: student
+    POSTGRES_DB: shop
+  ports:
+    - "5432:5432"
+  volumes:
+    - postgres_data:/var/lib/postgresql/data
+
 volumes:
   postgres_data:
 ```
 
-Ensures database persistence between container restarts.
+## Restart
+
+```bash
+docker compose down
+docker compose up -d
+```
+
+### Benefits
+
+- Persistent storage
+- Prevents data loss
+- Production-ready setup
 
 ---
 
+# 5. Architecture Diagram
+
+Example architecture:
+
+```text
+                Users
+                  |
+                  ▼
+           Frontend UI
+                  |
+                  ▼
+             Backend API
+                  |
+    ┌─────────────┼─────────────┐
+    ▼             ▼             ▼
+ PostgreSQL    MongoDB       Redis
+ Orders        Products      Cache
+ Payments      Catalog       Sessions
+ Inventory
+```
+
+## Database Responsibilities
+
+### PostgreSQL
+
+Used for:
+
+- Orders
+- Payments
+- Inventory
+
+Reason:
+
+- Strong consistency
+- Transactions
+- Relational data
+
+### MongoDB
+
+Used for:
+
+- Product catalog
+- Flexible product attributes
+- Document storage
+
+Reason:
+
+- Flexible schema
+- Easy horizontal scaling
+
+### Redis
+
+Used for:
+
+- Sessions
+- Caching
+- Shopping carts
+
+Reason:
+
+- Extremely fast reads and writes
+
+---
+
+# Discussion
+
+## When SQL is best
+
+- Financial transactions
+- Inventory management
+- Order processing
+- Strong consistency
+
+## When NoSQL is best
+
+- Product catalogs
+- Analytics
+- Logs
+- Flexible schemas
+
+## Eventual Consistency
+
+Suitable for:
+
+- Recommendations
+- Analytics
+- Search indexing
+
+## Strong Consistency
+
+Required for:
+
+- Payments
+- Orders
+- Inventory
+
+---
+
+# Conclusion
+
+This stretch goal demonstrates:
+
+- Performance optimization with pagination
+- Fast caching with Redis
+- Safe transactions
+- Persistent storage using Docker volumes
+- Scalable cloud architecture design
 
 ---
 
